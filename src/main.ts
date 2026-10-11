@@ -58,10 +58,16 @@ const MODELS: ModelDef[] = [
     hint: 'hero · pbr'
   },
   {
-    id: 'local-slot',
-    name: 'Local /models/custom.glb',
-    url: '/models/custom.glb',
-    hint: 'drop your file in public/models'
+    id: 'autumn-house',
+    name: 'Autumn House',
+    url: '/models/autumn_house.glb',
+    hint: 'local · propio'
+  },
+  {
+    id: 'van',
+    name: 'Van',
+    url: '/models/Van_v02.glb',
+    hint: 'local · propio'
   }
 ];
 
