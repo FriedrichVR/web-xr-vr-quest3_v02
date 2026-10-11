@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0e14" />
+    <meta name="description" content="WebXR GLB viewer for Meta Quest 3 — 2D pre-VR overlay + in-headset spatial HUD, world-locked transforms, passthrough MR." />
+    <title>Quest 3 WebXR GLB Viewer</title>
+    <style>
+      :root {
+        --bg: #0b0e14;
+        --panel: rgba(17, 22, 32, 0.92);
+        --card: #161d2b;
+        --line: #26314a;
+        --text: #eef2ff;
+        --muted: #9aa7c2;
+        --accent: #5b8cff;
+        --accent2: #22d3ee;
+        --ok: #34d399;
+        --warn: #fbbf24;
+        --danger: #fb7185;
+        --radius: 14px;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+        overflow: hidden;
+      }
+      #scene-container { position: fixed; inset: 0; }
+      #scene-container canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+      /* ---------- Pre-VR 2D overlay ---------- */
+      #ui {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        grid-template-columns: 380px 1fr;
+        pointer-events: none;
+        z-index: 10;
+      }
+      #ui .panel {
+        pointer-events: auto;
+        margin: 16px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        backdrop-filter: blur(14px);
+        display: flex;
+        flex-direction: column;
+        max-height: calc(100vh - 32px);
+        overflow: hidden;
+      }
+      #ui .panel-head {
+        padding: 16px 16px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      #ui .panel-head h1 { font-size: 17px; margin: 0 0 4px; letter-spacing: 0.2px; }
+      #ui .panel-head p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+      #ui .panel-body { padding: 14px 16px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+      #ui section h2 {
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
+        color: var(--muted); margin: 0 0 8px;
+      }
+      .model-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .model-card {
+        appearance: none;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--text);
+        border-radius: 10px;
+        padding: 10px;
+        text-align: left;
+        cursor: pointer;
+        min-height: 64px;
+        font-size: 13px;
+      }
+      .model-card small { display: block; color: var(--muted); font-size: 11px; margin-top: 4px; word-break: break-all; }
+      .model-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+      .model-card:disabled { opacity: 0.55; cursor: wait; }
+      .row { display: flex; gap: 8px; }
+      .row > * { flex: 1; }
+      button, select, input[type="color"] {
+        font: inherit;
+      }
+      .btn {
+        appearance: none;
+        border: 1px solid var(--line);
+        background: #1e2740;
+        color: var(--text);
+        border-radius: 10px;
+        padding: 12px;
+        cursor: pointer;
+        font-weight: 650;
+        font-size: 14px;
+        min-height: 48px; /* Quest touch target */
+      }
+      .btn.primary { background: linear-gradient(135deg, var(--accent), #7c5bff); border-color: transparent; }
+      .btn.mr { background: linear-gradient(135deg, #0ea5e9, var(--ok)); border-color: transparent; }
+      .btn.ghost { background: transparent; }
+      .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+      .btn:not(:disabled):active { transform: translateY(1px); }
+      label.field { display: grid; gap: 6px; font-size: 12.5px; color: var(--muted); }
+      label.field output { color: var(--text); }
+      input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px; }
+      select {
+        background: var(--card); color: var(--text);
+        border: 1px solid var(--line); border-radius: 10px; padding: 10px; min-height: 44px;
+      }
+      .check { display: flex; align-items: center; gap: 10px; font-size: 13.5px; min-height: 40px; }
+      .check input { width: 22px; height: 22px; accent-color: var(--accent); }
+      .hint {
+        background: #0f1524; border: 1px dashed var(--line); border-radius: 10px;
+        padding: 10px 12px; font-size: 12px; color: var(--muted); line-height: 1.55;
+      }
+      .hint code { color: var(--accent2); }
+      #xr-status, #caching-status { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+      #xr-status.ok { color: var(--ok); }
+      #xr-status.warn { color: var(--warn); }
+      #toast {
+        position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(20px);
+        background: #101828; border: 1px solid var(--line); color: var(--text);
+        padding: 10px 14px; border-radius: 999px; font-size: 13px; opacity: 0;
+        transition: opacity 0.25s, transform 0.25s; z-index: 40; pointer-events: none;
+        max-width: min(92vw, 560px); text-align: center;
+      }
+      #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      /* 2D view hint (right side, hidden in headset) */
+      #view-hint {
+        pointer-events: none;
+        align-self: end;
+        justify-self: end;
+        margin: 16px;
+        background: rgba(10, 14, 22, 0.72);
+        border: 1px solid var(--line);
+        padding: 8px 12px;
+        border-radius: 999px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      #view-hint b { color: var(--text); }
+
+      /* ---------- Loading overlay (DOM) ---------- */
+      #loading-overlay {
+        position: fixed; inset: 0; z-index: 30;
+        display: none; align-items: center; justify-content: center;
+        background: rgba(5, 8, 14, 0.66); backdrop-filter: blur(6px);
+      }
+      #loading-overlay.show { display: flex; }
+      .loader-card {
+        width: min(92vw, 420px);
+        background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+        padding: 20px; text-align: center;
+      }
+      .loader-card h3 { margin: 0 0 6px; font-size: 15px; }
+      .loader-card p { margin: 0 0 14px; color: var(--muted); font-size: 12.5px; }
+      .bar { height: 10px; border-radius: 999px; background: #0f172a; border: 1px solid var(--line); overflow: hidden; }
+      .bar > div {
+        height: 100%; width: 0%;
+        background: linear-gradient(90deg, var(--accent), var(--accent2));
+        transition: width 0.15s linear;
+      }
+      #loading-percent { margin-top: 10px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+      /* Hide 2D UI chrome while presenting (Meta best practice: DOM overlay is pre-VR) */
+      body.presenting #ui { display: none; }
+
+      @media (max-width: 820px) {
+        #ui { grid-template-columns: 1fr; }
+        #ui .panel { margin: 10px; max-height: 62vh; }
+        #view-hint { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="scene-container" aria-hidden="true"></div>
+
+    <div id="ui">
+      <div class="panel" role="dialog" aria-label="Pre-VR setup">
+        <div class="panel-head">
+          <h1>🥽 Quest 3 WebXR GLB Viewer</h1>
+          <p>Pick a model + tune lighting <b>before</b> entering VR. In-headset you get a spatial HUD to swap assets, toggle passthrough, reset and relight.</p>
+        </div>
+        <div class="panel-body">
+          <section aria-label="Models">
+            <h2>1 · Model (precached)</h2>
+            <div id="model-grid" class="model-grid"></div>
+            <div class="row" style="margin-top: 8px">
+              <button id="preload-all" class="btn ghost" type="button">↓ Preload all</button>
+              <label class="btn ghost" for="file-input" style="text-align: center; line-height: 24px; cursor: pointer">＋ Load .glb</label>
+              <input id="file-input" type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" hidden />
+            </div>
+            <div id="caching-status" style="margin-top: 8px">Cache: nothing loaded yet.</div>
+          </section>
+
+          <section aria-label="Environment">
+            <h2>2 · Environment &amp; lighting</h2>
+            <label class="field">Environment preset
+              <select id="env-preset">
+                <option value="room" selected>Room (neutral studio)</option>
+                <option value="sunset">Sunset (warm)</option>
+                <option value="night">Night (cool, dim)</option>
+                <option value="none">None (lights only)</option>
+              </select>
+            </label>
+            <label class="field">Exposure <output id="exposure-val" for="exposure">1.0</output>
+              <input id="exposure" type="range" min="0.2" max="2" step="0.05" value="1" />
+            </label>
+            <label class="field">Key light <output id="dir-val" for="dir-intensity">2.2</output>
+              <input id="dir-intensity" type="range" min="0" max="5" step="0.1" value="2.2" />
+            </label>
+            <label class="field">Fill light <output id="hemi-val" for="hemi-intensity">0.9</output>
+              <input id="hemi-intensity" type="range" min="0" max="3" step="0.1" value="0.9" />
+            </label>
+            <label class="field">Backdrop
+              <select id="bg-mode">
+                <option value="color" selected>Dark void</option>
+                <option value="grid">Grid floor (dev)</option>
+                <option value="transparent">Transparent (for MR)</option>
+              </select>
+            </label>
+            <label class="check"><input id="toggle-shadow" type="checkbox" checked /> Soft shadows</label>
+            <label class="check"><input id="toggle-turntable" type="checkbox" /> Turntable (desktop preview)</label>
+          </section>
+
+          <section aria-label="Session">
+            <h2>3 · Enter immersive mode</h2>
+            <div class="row">
+              <button id="enter-vr" class="btn primary" type="button" disabled>Enter VR</button>
+              <button id="enter-ar" class="btn mr" type="button" disabled>Passthrough MR</button>
+            </div>
+            <div id="xr-status" style="margin-top: 8px">Checking WebXR support…</div>
+            <div class="hint">
+              Quest 3 checklist: serve over <code>https://</code> (this dev server already does),
+              open this URL in <b>Meta Quest Browser</b>, then tap <b>Enter VR</b>.
+              Controllers: <b>trigger</b> = grab / press HUD · <b>grip + drag</b> = move ·
+              <b>2-hand grab</b> = pinch-scale + Y-rotate · <b>A/X</b> or HUD = recenter.
+            </div>
+          </section>
+        </div>
+      </div>
+      <div id="view-hint">Desktop: <b>drag</b> orbit · <b>wheel</b> zoom · <b>right-drag</b> pan</div>
+    </div>
+
+    <div id="loading-overlay" role="status" aria-live="polite">
+      <div class="loader-card">
+        <h3 id="loading-label">Loading model…</h3>
+        <p>Draco + glTF meshes are decoding. This stays smooth in-headset via the 3D bar too.</p>
+        <div class="bar"><div id="loading-bar-fill"></div></div>
+        <div id="loading-percent">0%</div>
+      </div>
+    </div>
+
+    <div id="toast" aria-live="polite"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
