@@ -68,6 +68,12 @@ const MODELS: ModelDef[] = [
     name: 'Van',
     url: '/models/Van_v02.glb',
     hint: 'local · propio'
+  },
+  {
+    id: 'pump',
+    name: 'Centrifugal Water Pump',
+    url: '/models/centrifugal_water_pump.glb',
+    hint: 'local · propio'
   }
 ];
 
